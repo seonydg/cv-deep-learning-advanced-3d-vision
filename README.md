@@ -1,6 +1,7 @@
 # Computer Vision Deep Learning Advanced: 3D Vision
 
 1. Point Transformer
+2. VoteNet
 
 
 ---
@@ -76,6 +77,97 @@ similarity는 먼저 query와 keys를 Dot-product를 하고 softmax와 같이 no
 Point Transformer은 kNN search with local(vector) self-attention을 사용한다. 여기에서 델타가 positional encoding이다.
 
 ![](https://velog.velcdn.com/images/seonydg/post/acbed9b9-9311-42c9-bb5c-50eade4839a6/image.png)
+
+
+---
+# 2. VoteNet
+# VoteNet(CVPR, 2020)
+
+Indoor Scenes은 기본적으로 데이터 RGBD(RGB + Depth Camera) 스캐닝 방식을 사용한다.
+**Indoor 3D Scenes Object Detection**의 input은 RGBD 이미지로 output은 3D 바운딩 박스로 z축 방향의 rotation이 있는 바운딩 박스를 해당하는 class label과 함께 예측하게 된다.
+
+![](https://velog.velcdn.com/images/seonydg/post/baa28be4-6771-4875-a817-17c827c82735/image.png)
+
+VoteNet(Deep Hough Voting for 3D Object Detection in Point Clouds)은 2D Detector를 사용하지 않는다. 그리고 Point Clouds 자체에서 3D Detection을 수행한다. 그리고 RGBD를 사용하지 않고 Depth Image만을 사용하여도, 기존의 RGBD Image를 사용하는 방법들보다 좋은 성능을 냈다는 특징이 있다.
+
+
+### Hough Voting
+
+먼저 Hough Voting 방식이 무엇인지 잠시 살펴보도록 하자.
+Hough Voting은 2D Detection에서 사용되던 방법으로, 아래의 그림과 같이 엣지 부분 등으로 관심가는 포인트들을 찾고 그 포인트의 일정한 크기의 패치를 추출한다. 그리고 패치에서 training에서 존재하는 패치 중 유사한 패치를 찾는다. training에서 각 패치마다 어떤 object center와 연관되어 있는지 알고 있고 training image를 바탕으로 voting을 하게 된다. 
+
+![](https://velog.velcdn.com/images/seonydg/post/90792248-e59d-408a-b1a3-f28d5abcaa2a/image.png)
+
+모든 voting이 옳바르게 voting이 될 수는 없다. 예로 아래의 그림과 같이 산의 엣지 부분의 패치가 '소'의 엉덩이 부분이랑 잘못 매칭이 되는 경우도 발생한다. 
+
+![](https://velog.velcdn.com/images/seonydg/post/6ed85440-c415-4231-9b99-ea0e9fe6a5cc/image.png)
+
+그래서 모든 매칭이 이루어진 다음에는 아래와 같이 voting이 밀집되어 있는 곳만 제대로 매칭이 된 voting라고 판단을 하고 Object Detection에 사용하게 된다. 즉 voting space에서 peak 부분만 사용한다고 볼 수 있다.
+
+![](https://velog.velcdn.com/images/seonydg/post/cb9579ba-1434-4d73-9dd1-2fa6b48874b8/image.png)
+
+그리고 peakㄹㄹ 찾고 난 이후에는 voting에 기여한 패치들이 어디 있는지 다시 back projection하여 찾는다. 그리고 패치들을 바탕으로 아래와 같이 바운딩 박스에 대한 정보를 확인할 수 있게 된다.
+이것이 2D Hough Voting의 방법을 이용한 Object detector다.
+
+![](https://velog.velcdn.com/images/seonydg/post/22b534cf-07b9-43ce-a7d5-12e021faf55d/image.png)
+
+
+## VoteNet 수행 단계
+
+아래의 그림을 참조하여 살펴보자.
+
+**Input**
+**VoteNet**은 N개의 input을 Point cloud feature를 추출할 수 있는 backbone을 이용하여 Point feature를 추출한다. 논문에서 사용되는 backbone은 PointNet++을 사용한다.
+
+**Seeds**
+추출된 Point feature를 interest points(Seed Point)를 샘플링한다. 샘플링 과정은 Point Transformer에서 사용된 Farthest point sampling(FPS)를 사용한다. 
+
+**Votes**
+샘플링을 통해 추출된 M개의 Seed Points에 대하여 Shared MLP를 이용한 voting 과정을 수행한다. voting 과정은 각 seed point에 할당된 object의 center를 에측하는 과정이다. 
+
+**Vote clusters**
+Vote 과정에서 빨간점처럼 vote가 있으면 clustering을 통해 voting의 peak 지점을 찾는다. cluster의 개수는 미리 지정하는 k개로 FPS를 이용하여 k개의 cluster center를 먼저 샘플링한다. 
+
+**Output**
+그 이후에 radius search를 이용한 grouping을 수행하여 같은 cluster 안에 있는 Point feature를 aggregation하여 마지막 바운딩 박스를 예측하게 된다.
+
+![](https://velog.velcdn.com/images/seonydg/post/45a3a893-bc02-4f9d-9646-3b153c9da255/image.png)
+
+VoteNet은 기본적으로 **2 Stage Object Detection** 형식을 따르고 있기 때문에 마지막 부분에 3D non-maximum suppression(NMS)과정이 필수적으로 들어가게 된다.
+
+
+
+**2D Hough Voting**에서는 바운딩 박스를 찾기 위해 voting을 하는데 기여한 패치들을 back projection하는 과정이 필요했던 반면, 3D VoteNet에서는 clustering하여 찾아낸 cluster features를 aggregation하여 Pooling할 것인지 MLP를 통해서 학습을 하게 된다.
+
+
+## Loss
+
+**Vote Regression Loss**
+Seed point들이 object 중심을 잘 예측할 수 있도록 Regression Loss가 있다. 
+그 다음은 2 Stage Object Detection 형식을 따르고 있다.
+
+**Classification Loss**
+Proposal된 바운딩 박스가 object인지 아닌지 분류하는 Classification Loss가 있다.
+
+**Bounding Box Regression Loss**
+예측된 Bounding Box의 크기를 예측하는 Regression Loss가 있다.
+
+**semantic Classification**
+예측된 Bounding Box에서 각 semantic class가 무엇인지 분류하는 Classification Loss가 있다.
+
+![](https://velog.velcdn.com/images/seonydg/post/c37206e0-c1f4-4e73-890e-181210dbe384/image.png)
+
+**Vote Regression Loss** 다음의 3가지 Loss는 기존의 2 Stage Object Detection에서 사용한 Loss와 같다.
+
+Vote Regression Loss 좀 더 살펴보자면, Seed point가 object일 때 Loss를 계산한다. 
+아래의 계산식에서 보면, s1(seed point) on object는 Seed point가 object 위에 있을 때를 의미하는 것으로 Seed point에만 Loss를 주고 아닐 때에는 Loss를 주지 않는다. 
+그러면 object인지 아닌지 판단하는 것은 아래의 그림과 같이, object 중심으로부터 0.3 이내에 있으면 objcet 안에 있다고 보고 0.6보다 밖에 있으면 아니라고 본다.
+
+![](https://velog.velcdn.com/images/seonydg/post/6e58ab39-bfa2-42e7-bbbb-9d06983ccf35/image.png)
+
+실험 결과를 살펴보면. VoteNet의 Input은 Geo metric(Depth)만을 사용하여도 기존의 방법들보다 좋은 성능을 보이고 있다.
+
+![](https://velog.velcdn.com/images/seonydg/post/cd9fb342-c7b2-4427-a21f-8a77310aa5c2/image.png)
 
 아래는 ate of the art performance** 결과이다.
 
