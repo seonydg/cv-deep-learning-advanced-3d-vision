@@ -1,9 +1,9 @@
 # Computer Vision Deep Learning Advanced: 3D Vision
 
-1. Point Transformer
-2. VoteNet
-3. SPVNAS
-
+1. Point Transformer - Indoor segmentation
+2. VoteNet - Indoor Object Detection
+3. SPVNAS - Outdoor Sematic Segmentation
+4. VoxelNet - Outdoor Object Detection
 
 ---
 # 1. Point Transformer
@@ -272,3 +272,86 @@ NAS를 간단히 보면, 먼저 사람이 정해놓은 Search Space가 있고 Se
 ## Results
 
 ![](https://velog.velcdn.com/images/seonydg/post/ba10b5b6-6876-408a-8107-993366d40abf/image.png)
+
+
+---
+# VoxelNet
+# VoxelNet
+
+
+## Region Proposal Network
+
+3D Object Detection의 특징은 3D를 BEV(Bird-eye_view), 즉 조감도처럼 2D의 이미지를 먼저 보고, 2D에서 region proposal을 하고 그 region에서 깊이까지 예측을 한다.
+
+![](https://velog.velcdn.com/images/seonydg/post/76ec1785-f8f5-498e-890c-925d126b2c1d/image.png)
+
+간단히 Region Proposal Network을 다시 말해보자면,
+Region Proposal은 Faster R-CNN에서 제안된 것으로, 객체가 있을 만한 곳을 Proposal을 해주는 네트워크다.
+필셀별로 미리 정의된 스케일이 다른 앵커 박스를 정의(Faster R-CNN에서는 9개)하고 객체가 있을 법한 바운딩 박스를 찾는다. 그리고 바운딩 박스 안에 있는 features을 RoI Pooling을 통해서 바운딩 박스를 예측한다.
+
+![](https://velog.velcdn.com/images/seonydg/post/e043d484-db55-4431-a7fa-08d5d18a4f01/image.png)
+
+
+## VoxelNet
+
+VoxelNet의 원문은 **End-to_End Learning for Point Cloud Based 3D Object Detection**으로 3D Object Detection을 위한 네트워크로 처음으로 End-to_End Learning이 가능한 모델이다.
+
+핵심적으로 제안된 부분은 **Voxel feature encoding(VFE) layer**다.
+먼저 **Feature Learning Network** 과정에서 Point Clouds가 들어왔을 때 2D Image다운 Tensor로 Point Clouds를 만드는 과정이 중요하다.
+
+**Voxel Partition**
+LiDAR Point Clouds가 들어오면 resolution DHW 복셀 그리드를 정의한다.
+
+**Grouping**
+그리고 같은 Voxel 아에 들어가는 Point들에 대해서 Grouping을 한다. 일반적으로 MaxPooling 또는 MeanPooling을 한다.
+
+**Random Sampling**
+하지만 단순히 grouping을 해버리면 LiDAR Point Cloud의 특징인 멀어질수록 Sparse해지기에 밀도를 다루는데 있어 어려움이 있다. 이러한 점을 맞춰주기 위해 Random Sampling을 수행한다. 너무 많은 포인트가 있는 복셀들은 포인트를 줄여주는 효과를 가지게 된다.
+
+**VStacked Voxel Feature Encoding**
+이 후에 VFE layer을 통과하여 voxel feature를 최종적으로 얻게 된다.
+
+**Sparse 4D Tensor**
+DHW 위치에서 각각 C dimension의 feature를 가지고 있는 voxel feature grid가 만들어지고 이 4D 텐서를 2D conv으로 적용시킨다.
+
+![](https://velog.velcdn.com/images/seonydg/post/85c164e8-5a40-42d4-9d2b-8b33b9e14b61/image.png)
+
+
+### VFE
+
+Voxel feature encoding(VFE) layer에 대해서 조금 자세하게 살펴보자.
+
+기존의 복셀은 아래의 그림에서 상자와 같이 생겼다고 했을 때, 각 복셀 안의 point의 위치를 Pi, point의 input feature를 fi라고 한다. 
+그리고 복셀 안의 fi를 symmetric function, 예로 maxpooling, sumpooling, meanpooling 등을 이용해서 voxel feature v를 만든다. 이런 방법은 복셀 내부 포인트의 distribution을 인코딩할 수가 없게 된다. 왜냐하면 포인트들이 어떤 식으로 위치해 있든 fi를 pooling을 하게 되면 v라는 백터는 동일하기 때문이다.
+
+![](https://velog.velcdn.com/images/seonydg/post/57dc1097-ab9c-41bf-a11c-28ba070b0654/image.png)
+
+LiDAR point cloud가 들어오면 복셀마다 density를 맞춰주는 Random Sampling 과정이 있다.
+
+![](https://velog.velcdn.com/images/seonydg/post/0c88cebf-f508-4abe-9a0e-cd0dcc7505ff/image.png)
+
+Random Sampling 다음, 아래의 그림과 같이 한 복셀 안에 Pi들, P1, P2, P3이 있고 복셀의 centroid v를 정의한다. 센트로이드에서 각 포인트까지의 이어진 위치를 계산해서 Augmented 한다. 이렇게 되면 Augmented input은 복셀 내부의 distribution을 인코딩할 수 있게 된다.
+그래서 point-wise feature에  voxel feature를 붙여서 point-wise concatenated feature를 얻게 된다. 최종적으로 이 과정을 반복하여 Maxpooling을 하여 voxel-wise feature를 얻게 된다.
+
+![](https://velog.velcdn.com/images/seonydg/post/3febb500-a82c-41cd-ab4d-c489fd10a7a7/image.png)
+
+이렇게 만들어진 4D 텐서가 만들어지면 2D Conv을 이용하여 처리하게 된다.
+아래의 그림은 RPN으로 feature map이 들어왔을 때 2D Conv를 이용하여 U-Net같은 형태로 수행을 한다. 그리고 최종적인 score map과 regression map을 예측한다.
+
+2D RPN과 같이 2가지의 앵커를 미리 정의하는데, 앵커의 shape은 마지막의 전체 픽셀을 의미하고 각도만 기존의 90도 로테이션하여 정의한다.
+그 다음 probability score map은 하나의 스칼라 값으로 각 앵커가 **pos or neg**한지 에측한다. 전체 앵커가 location마다 2개이기에 최종적으로 2개를 에측하게 되어 있다.
+그 다음 3D 바운딩 박스이기 때문에 7개의 스칼라 값으로 표현할 수 있고 각 앵커마다 7개의 스칼라 값을 regression한다. 앵커마다 7개의 스칼라 값이기 때문에 2개의 앵커에 14개의 스칼라 값을 예측하게 된다.
+
+![](https://velog.velcdn.com/images/seonydg/post/e04232ec-d450-40da-be02-4189b9a2eebf/image.png)
+
+regression map 안의 2개의 앵커에 7개의 스칼라 값은 x, y, z 센터의 위치와 l, w, h라는 바운딩 박스의 크기와 세타(theta)로 이루어져 있다. theta는 z축(중력이 작동하는 축) 기준으로 theta만큼 회전시킨 것을 의미한다.
+
+
+![](https://velog.velcdn.com/images/seonydg/post/88dc9ff0-6d27-475c-88a1-4ad7d90b05a2/image.png)
+
+
+### Results
+
+KITTI Dataset에서 실험을 한 결과이다.
+
+![](https://velog.velcdn.com/images/seonydg/post/062ae2cc-08fc-45ab-9493-84defd9bb9e9/image.png)
